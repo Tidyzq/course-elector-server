@@ -90,13 +90,17 @@ module.exports = function(db) {
         getHunterById: function getHunterById(hunterId) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return new Promise(function (resolve, reject) {
-                var id = ObjectID(hunterId);
-                hunterCollection.findOne({'_id': id}).then(function (foundHunter) {
-                    resolve(foundHunter);
-                }, function (error) {
-                    debug(error);
-                    reject(statusCode['db error']);
-                });
+                if (hunterId) {
+                    var id = ObjectID(hunterId);
+                    hunterCollection.findOne({'_id': id}).then(function (foundHunter) {
+                        resolve(foundHunter);
+                    }, function (error) {
+                        debug(error);
+                        reject(statusCode['db error']);
+                    });
+                } else {
+                    reject(statusCode['invalid arguments']);
+                }
             });
         },
 
@@ -112,7 +116,7 @@ module.exports = function(db) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return new Promise(function (resolve, reject) {
                 if (userId) {
-                    hunterCollection.find({'owner': userId}).then(function (foundHunters) {
+                    hunterCollection.find({'owner': userId}).toArray().then(function (foundHunters) {
                         resolve(foundHunters);
                     }, function (error) {
                         debug(error);
