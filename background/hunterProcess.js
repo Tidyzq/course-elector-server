@@ -3,7 +3,7 @@ var db_path = require('../variables').db_path;
 var statusCode = require('../variables').statusCode;
 var hunterStatus = require('../variables').hunterStatus;
 var mongoClient = require('mongodb').MongoClient;
-//var childProcess = require('child_process');
+var deasync = require('deasync');
 
 mongoClient.connect(db_path).then(function (db) {
 	debug("Connect to mongodb " + db_path + " succeed");
@@ -145,20 +145,33 @@ mongoClient.connect(db_path).then(function (db) {
 		}
 	});
 
-    process.on('beforeExit', function () {
+    function saveData() {
+        var counter = 0, target = hunterStack.length;
         // 保存hunter数据
         for (var hunterId in hunterStack) {
             if (hunterStack.hasOwnProperty(hunterId)) {
                 (function (hunterId) {
-                    hunterController.updateHunter(hunterStack[hunterId]);
+                    hunterController.updateHunter(hunterStack[hunterId]).then(function () {
+                        counter++;
+                    }, function (errCode) {
+                        debug('save hunter ' + hunterId + ' failed with errCode: ' + errCode);
+                    });
                 })(hunterId);
             }
         }
+        deasync.loopWhile(function () { // 将异步转换为同步
+            return counter != target;
+        });
+    }
+
+    process.on('SIGINT', function () { // 监听 ctrl + c
+       process.exit();
     });
 
 	process.on('exit', function (code) {
 		clearInterval(clocker_timer);
         clearInterval(update_timer); // 关闭刷课和更新循环
+        saveData();
 		db.close();
 		debug("Connection closed " + code);
 	});
