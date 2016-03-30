@@ -1,7 +1,6 @@
 var debug = require('debug')('course-elector-server:hunterController');
 var ObjectID = require('mongodb').ObjectID;
 var statusCode = require('../variables').statusCode;
-var hunterStatus = require('../variables').hunterStatus;
 var Hunter = require('../models/hunter.js').Hunter;
 
 module.exports = function(db) {
@@ -15,21 +14,19 @@ module.exports = function(db) {
         // 返回：
         // 		Promise:
         //			resolve(hunterId)
-        //			reject(errCode)
-        addHunter: function addHunter(hunter) {
+        //			reject(statusCode)
+        addHunter: function addHunter(courseToHunt, courseToQuit, owner) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return new Promise(function (resolve, reject) {
-                if (Hunter.prototype.isPrototypeOf(hunter)) {
-                    hunterCollection.insert(hunter).then(function (resultArr) {
-                        var hunterId = resultArr.insertedIds[1];
-                        resolve(hunterId);
-                    }, function (error) {
-                        debug(error);
-                        reject(statusCode['db error']);
-                    });
-                } else {
-                    reject(statusCode['invalid arguments']);
-                }
+                var uid = ObjectID(owner);
+                var hunter = new Hunter(uid, courseToHunt, courseToQuit);
+                hunterCollection.insert(hunter).then(function (resultArr) {
+                    var hunterId = resultArr.insertedIds[1];
+                    resolve(hunterId);
+                }, function (error) {
+                    debug(error);
+                    reject(statusCode.db_error);
+                });
             });
         },
 
@@ -49,7 +46,7 @@ module.exports = function(db) {
                     resolve();
                 }, function (error) {
                     debug(error);
-                    reject(statusCode['db error']);
+                    reject(statusCode.db_error);
                 });
             });
         },
@@ -71,10 +68,10 @@ module.exports = function(db) {
                         resolve();
                     }, function (error) {
                         debug(error);
-                        reject(statusCode['db error']);
+                        reject(statusCode.db_error);
                     });
                 } else {
-                    reject(statusCode['invalid arguments'])
+                    reject(statusCode.invalid_arguments)
                 }
             });
         },
@@ -96,10 +93,10 @@ module.exports = function(db) {
                         resolve(foundHunter);
                     }, function (error) {
                         debug(error);
-                        reject(statusCode['db error']);
+                        reject(statusCode.db_error);
                     });
                 } else {
-                    reject(statusCode['invalid arguments']);
+                    reject(statusCode.invalid_arguments);
                 }
             });
         },
@@ -116,14 +113,45 @@ module.exports = function(db) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return new Promise(function (resolve, reject) {
                 if (userId) {
-                    hunterCollection.find({'owner': userId}).toArray().then(function (foundHunters) {
+                    var uid = ObjectID(userId);
+                    hunterCollection.find({'owner': uid}).toArray().then(function (foundHunters) {
                         resolve(foundHunters);
                     }, function (error) {
                         debug(error);
-                        reject(statusCode['db error']);
+                        reject(statusCode.db_error);
                     });
                 } else {
-                    reject(statusCode['invalid arguments']);
+                    reject(statusCode.invalid_arguments);
+                }
+            });
+        },
+
+        // 参数：
+        // 		hunterId hunter在数据库中的_id
+        // 		userId 用户的id
+        // 作用：
+        //		判断该hunter是否属于该用户
+        // 返回：
+        // 		Promise:
+        //			resolve(foundHunter)
+        //			reject(errCode)
+        isOwnedBy: function isOwnedBy(hunterId, userId) {
+            debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
+            return new Promise(function (resolve, reject) {
+                if (userId && hunterId) {
+                    var uid = ObjectID(userId), hid = ObjectID(hunterId);
+                    hunterCollection.findOne({'_id': hid}).then(function (foundHunter) {
+                        if (foundHunter.owner == uid) {
+                            resolve(foundHunter);
+                        } else {
+                            reject(statusCode.not_owned);
+                        }
+                    }, function (error) {
+                        debug(error);
+                        reject(statusCode.db_error);
+                    });
+                } else {
+                    reject(statusCode.invalid_arguments);
                 }
             });
         }

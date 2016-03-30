@@ -15,14 +15,13 @@ module.exports = function (db) {
     // 返回：
     // 		Promise:
     //			resolve(foundUser)
-    //			reject()
+    //			reject(statusCode)
     function getUserById (userId) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
-        return new Promise(function (resolve, reject) {
-            var id = ObjectID(userId);
-            userCollection.findOne({'_id': id}).then(function (foundUser) {
-                foundUser ? resolve(foundUser) : reject();
-            });
+        var id = ObjectID(userId);
+        return userCollection.findOne({'_id': id}).catch(function (error) {
+            debug(error);
+            return statusCode.db_error;
         });
     }
 
@@ -33,13 +32,12 @@ module.exports = function (db) {
     // 返回：
     // 		Promise:
     //			resolve(foundUser)
-    //			reject()
+    //			reject(statusCode)
     function getUserByName (username) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
-        return new Promise(function (resolve, reject) {
-            userCollection.findOne({username: username}).then(function (foundUser) {
-                foundUser ? resolve(foundUser) : reject();
-            });
+        return userCollection.findOne({username: username}).catch(function (error) {
+            debug(error);
+            return statusCode.db_error;
         });
     }
 
@@ -56,13 +54,82 @@ module.exports = function (db) {
             http.get('http://uems.sysu.edu.cn/elect/index.html?time=' + Date(), function (res) {
                 var cookie = res.headers['set-cookie'][0];
                 var jsessionid = /JSESSIONID=([^;]*);/.exec(cookie)[1];
-                debug('got jsessionid: ' + jsessionid);
                 resolve(jsessionid);
             }).on('error', function (error) {
                 reject(statusCode.http_error);
                 debug('http error: ', error.message);
             });
         });
+    }
+
+    // 参数：
+    // 		jsessionid 教务系统登陆的sessionid
+    // 		username 用户的学号
+    // 		password 用户的教务系统密码
+    // 作用：
+    //		获取验证码, 并且尝试登陆
+    //      该函数会在验证码错误时自动重新尝试,只有在非验证码错误才会返回reject
+    // 返回：
+    // 		Promise:
+    //			resolve(sid)
+    //			reject(statusCode)
+    function postLogin(jsessionid, username, password) {
+        return getCheckCode(jsessionid).then(function (checkcode) {
+            return new Promise(function (resolve, reject) {
+                var postData = querystring.stringify({
+                    'username': username,
+                    'password': password,
+                    'j_code': checkcode
+                });
+                var options = {
+                    hostname: 'uems.sysu.edu.cn',
+                    path: '/elect/login',
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Content-Length': postData.length,
+                        'Cookie': 'JSESSIONID=' + jsessionid
+                    }
+                };
+                var req = http.request(options, function (res) {
+                    res.setEncoding('utf8');
+                    if (res.statusCode == 500) {
+                        var body = [];
+                        res.on('data', function (html) {
+                            body.push(html);
+                        }).on('end', function () {
+                            var a = /if \('([^']*)' != '([^']*)'\)/.exec(body.join())[1];
+                            switch (a) {
+                                case "": // 用户不存在或密码错误
+                                    debug('invalid password');
+                                    reject(statusCode.invalid_password);
+                                    break;
+                                case "验证码错误":
+                                    debug('invalid checkcode');
+                                    reject(statusCode.wrong_checkcode);
+                                    break;
+                                default:
+                                    debug('Got error:', a);
+                                    reject(statusCode.http_error);
+                                    break;
+                            }
+                        }).on('error', function () {
+                            reject(statusCode.http_error);
+                        });
+                    } else {
+                        var location = res.headers.location;
+                        var sid = /sid=(\S*)/.exec(location)[1];
+                        resolve(sid);
+                    }
+                });
+                // write data to request body
+                req.write(postData);
+                req.end();
+            }).catch(function (errCode) {
+                if (errCode == statusCode.wrong_checkcode) return postLogin(jsessionid, username, password); // 如果验证码错误自动重试
+                else return Promise.reject(errCode);
+            });
+        })
     }
 
     // 参数：
@@ -76,66 +143,11 @@ module.exports = function (db) {
     //			reject(statusCode)
     function loginToJWXT (username, password) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
-        getCookie().then(function (jsessionid) {
-            // TODO
-        }, function () {
-            return loginToJWXT(username, password);
-        })
-        // TODO
-                var func = function () {
-                    getCheckCode(jsessionid).then(function (checkcode) {
-                        var postData = querystring.stringify({
-                            'username': username,
-                            'password': password,
-                            'j_code': checkcode
-                        });
-                        var options = {
-                            hostname: 'uems.sysu.edu.cn',
-                            path: '/elect/login',
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/x-www-form-urlencoded',
-                                'Content-Length': postData.length,
-                                'Cookie': 'JSESSIONID=' + jsessionid
-                            }
-                        };
-                        var req = http.request(options, function (res) {
-                            res.setEncoding('utf8');
-                            if (res.statusCode == 500) {
-                                var body = [];
-                                res.on('data', function (html) {
-                                    body.push(html);
-                                }).on('end', function () {
-                                    var a = /if \('([^']*)' != '([^']*)'\)/.exec(body.join())[1];
-                                    debug('info:' + a);
-                                    switch (a) {
-                                        case "": // 用户不存在或密码错误
-                                            debug('invalid password');
-                                            reject(statusCode.invalid_password);
-                                            break;
-                                        case "验证码错误": // 重新登陆
-                                            debug('invalid checkcode');
-                                            func(); // 再次获取验证码并登陆
-                                            break;
-                                        default:
-                                            debug('Got error:', a);
-                                            break;
-                                    }
-                                });
-                            } else {
-                                var location = res.headers.location;
-                                var sid = /sid=(\S*)/.exec(location)[1];
-                                resolve({ jsessionid: jsessionid, sid: sid });
-                            }
-                        });
-
-                        // write data to request body
-                        req.write(postData);
-                        req.end();
-                    });
-                };
-                func();
-
+        return getCookie().then(function (jsessionid) {
+            return postLogin(jsessionid, username, password).then(function (sid) {
+                return Promise.resolve({jsessionid: jsessionid, sid: sid});
+            });
+        });
     }
 
     // 参数：
@@ -148,23 +160,33 @@ module.exports = function (db) {
     // 返回：
     // 		Promise:
     //			resolve(userId)
+    //          reject(statusCode);
     function updateUser (username, password, jsessionid, sid) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
+        debug(username, password, jsessionid, sid);
         return getUserByName(username).then(function (foundUser) {
-            return userCollection.update({'_id': foundUser._id}, {$set: {password: password, jsessionid: jsessionid, sid: sid}}).then(function () {
-                return Promise.resolve(foundUser._id);
-            });
-        }, function () {
-            var user = {
-                username: username,
-                password: password,
-                jsessionid: jsessionid,
-                sid: sid
-            };
-            return userCollection.insert(user).then(function(resultArr) {
-                var userId = resultArr.insertedIds[1];
-                return Promise.resolve(userId);
-            });
+            if (foundUser) { // 如果存在用户, 则更新用户信息
+                return userCollection.update({'_id': foundUser._id}, {$set: {password: password, jsessionid: jsessionid, sid: sid}}).then(function () {
+                    return Promise.resolve(foundUser._id);
+                }, function (error) {
+                    debug(error);
+                    return Promise.reject(statusCode.db_error);
+                });
+            } else { // 如果不存在, 则创建新用户
+                var user = {
+                    username: username,
+                    password: password,
+                    jsessionid: jsessionid,
+                    sid: sid
+                };
+                return userCollection.insert(user).then(function (resultArr) {
+                    var userId = resultArr.insertedIds[1];
+                    return Promise.resolve(userId);
+                }, function (error) {
+                    debug(error);
+                    return Promise.reject(statusCode.db_error);
+                });
+            }
         });
     }
 
@@ -175,29 +197,26 @@ module.exports = function (db) {
     //		检查jsessionid和sid是否可用，如果可用，则返回resolve，否则reject
     // 返回：
     // 		Promise:
-    //			resolve()
-    //			reject()
+    //			resolve(ok)
+    //			reject(statusCode)
     function verifyLoginInfo (jsessionid, sid) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
         var query = querystring.stringify({sid: sid});
         var options = {
             host: 'uems.sysu.edu.cn',
             path: '/elect/s/types?' + query,
-            method: 'GET',
             headers: {
                 Cookie: 'JSESSIONID=' + jsessionid,
                 Connection: 'keep-alive'
             }
         };
         return new Promise(function (resolve, reject) {
-            var req = http.request(options, function (res) {
-                debug(res.statusCode);
-                res.statusCode != 500 ? resolve() : reject();
-            });
-            req.on('error', function (err) {
+            http.get(options, function (res) {
+                resolve(res.statusCode != 500);
+            }).on('error', function (err) {
                 debug(err);
+                reject(statusCode.http_error);
             });
-            req.end();
         });
     }
 
@@ -208,6 +227,7 @@ module.exports = function (db) {
     // 返回：
     // 		Promise:
     //			resolve(result)
+    //          reject(statusCode)
     function getCheckCode (jsessionid) {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
         var options = {
@@ -218,8 +238,8 @@ module.exports = function (db) {
         return new Promise(function (resolve, reject) {
             python.run('verify.py', options, function (err, results) {
                 if (err) {
+                    reject(statusCode.python_error);
                     debug(err);
-                    reject();
                 } else {
                     resolve(results[0]);
                 }
@@ -241,8 +261,6 @@ module.exports = function (db) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return loginToJWXT(username, password).then(function (result) {
                 return updateUser(username, password, result.jsessionid, result.sid);
-            }, function () {
-                return Promise.reject(statusCode["invalid password"]);
             });
         },
 
@@ -257,14 +275,16 @@ module.exports = function (db) {
         getLoginInfo: function getLoginInfo (userId) {
             debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
             return getUserById(userId).then(function (foundUser) {
-                return verifyLoginInfo(foundUser.jsessionid, foundUser.sid).then(function () {
-                    return Promise.resolve({ jsessionid: foundUser.jsessionid, sid: foundUser.sid });
-                }, function () {
-                    return loginToJWXT(foundUser.username, foundUser.password).then(function (result) {
-                        return updateUser(foundUser.username, foundUser.password, result.jsessionid, result.sid);
-                    }, function () {
-                        return Promise.reject(statusCode["invalid password"]);
-                    });
+                return verifyLoginInfo(foundUser.jsessionid, foundUser.sid).then(function (ok) {
+                    if (ok) {
+                        return Promise.resolve({ jsessionid: foundUser.jsessionid, sid: foundUser.sid });
+                    } else {
+                        return loginToJWXT(foundUser.username, foundUser.password).then(function (result) {
+                            return updateUser(foundUser.username, foundUser.password, result.jsessionid, result.sid).then(function () {
+                                return Promise.resolve(result);
+                            });
+                        });
+                    }
                 });
             });
         }

@@ -33,7 +33,10 @@ var statusCode = {
 	'sid_fails': 								31,
 	'http_error': 								32,
     'invalid_arguments':                        33,
-    'db_error':                                 34
+    'db_error':                                 34,
+	'python_error':								35,
+	'not_owned':								36,
+	'hunter_is_alive':							37
 };
 
 var hunterStatus = {

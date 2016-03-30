@@ -141,19 +141,32 @@ mongoClient.connect(db_path).then(function (db) {
 		}
 		if (message.kill) {
             hunterId = message.kill;
-			if (hunterStack[hunterId]) hunterStack[hunterId].hunterStatus = hunterStatus['dead'];
+			if (hunterStack[hunterId]) hunterStack[hunterId].hunterStatus = hunterStatus.dead;
 		}
 	});
 
+    Object.size = function(obj) {
+        var size = 0, key;
+        for (key in obj) {
+            if (obj.hasOwnProperty(key)) size++;
+        }
+        return size;
+    };
+
     function saveData() {
-        var counter = 0, target = hunterStack.length;
+        debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
+        debug('running stack: ', hunterStack);
+        var counter = 0, target = Object.size(hunterStack);
+        debug(target);
         // 保存hunter数据
+
         for (var hunterId in hunterStack) {
             if (hunterStack.hasOwnProperty(hunterId)) {
                 (function (hunterId) {
                     hunterController.updateHunter(hunterStack[hunterId]).then(function () {
                         counter++;
                     }, function (errCode) {
+                        counter++;
                         debug('save hunter ' + hunterId + ' failed with errCode: ' + errCode);
                     });
                 })(hunterId);
@@ -165,7 +178,8 @@ mongoClient.connect(db_path).then(function (db) {
     }
 
     process.on('SIGINT', function () { // 监听 ctrl + c
-       process.exit();
+        debug('SIGINT');
+        process.exit();
     });
 
 	process.on('exit', function (code) {

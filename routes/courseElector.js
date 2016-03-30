@@ -1,120 +1,182 @@
 var express = require('express');
 var debug = require('debug')('course-elector-server:courseElector');
 var statusCode = require('../variables').statusCode;
+var hunterStatus = require('../variables').hunterStatus;
+var childProcess = require('child_process');
 
 module.exports = function (db) {
 
     var userController = require('../controllers/userController')(db);
     var courseController = require('../controllers/courseController');
     var tokenController = require('../controllers/tokenController');
+    var hunterController = require('../controllers/hunterController')(db);
     var router = express.Router();
+    var hunterProcess = childProcess.fork('./background/hunterProcess');
 
-    function response(status, data) {
+    function Response(status, data) {
         this.status = status;
         this.data = data;
     }
 
-    router.post('/login', function(req, res, next) {
+    router.all('*', function (req, res, next) {
         debug(req.path);
-        var username = req.body.username, password = req.bodyß.password;
+        next();
+    });
+
+    router.post('/login', function(req, res, next) {
+        var username = req.body.username, password = req.body.password;
         userController.login(username, password).then(function (userId) {
-            tokenController.getToken(userId).then(function (token) {
-                res.json(new response(0, {token: token}));
-            });
-        }, function (errorCode) {
-            res.json(new response(errorCode, {}));
+            return tokenController.getToken(userId);
+        }).then(function (token) {
+            res.json(new Response(statusCode.success, {token: token}))
         }).catch(function (error) {
-            debug(error);
-            res.end();
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
         });
     });
 
     router.get('/course-list', function(req, res, next) {
-        debug(req.path);
-        var token = req.headers.token;
+        var token = req.get('token');
         tokenController.verify(token).then(function (userId) {
-            userController.getLoginInfo(userId).then(function (info) {
-                courseController.getCourseList(info.jsessionid, info.sid).then(function (courseList) {
-                    res.json(new response(0, {"course-group": courseList}));
-                });
+            return userController.getLoginInfo(userId).then(function (info) {
+                return courseController.getCourseList(info.jsessionid, info.sid);
             });
-        }, function (errorCode) {
-            res.json(new response(errorCode, {}));
+        }).then(function (courseList) {
+            res.json(new Response(statusCode.success, {"course-group": courseList}));
         }).catch(function (error) {
-            debug(error);
-            res.end();
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
         });
     });
 
     router.get('/course-detail', function(req, res, next) {
-        debug(req.path);
-        var token = req.query.token, courseId = req.query['course-id'];
+        var token = req.get('token'), courseId = req.query.id;
         tokenController.verify(token).then(function (userId) {
-            userController.getLoginInfo(userId).then(function (jsessionid, sid) {
-                courseController.getCourseDetail(jsessionid, sid, courseId).then(function (courseDetail) {
-                    res.json(new response(0, courseDetail));
-                });
+            return userController.getLoginInfo(userId).then(function (jsessionid, sid) {
+                return courseController.getCourseDetail(jsessionid, sid, courseId);
             });
-        }, function () {
-            res.json(new response(2, {}));
+        }).then(function (courseDetail) {
+            res.json(new Response(statusCode.success, {detail: courseDetail}));
         }).catch(function (error) {
-            debug(error);
-            res.end();
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
         });
     });
 
     router.post('/elect', function(req, res, next) {
-        debug(req.path);
-        var token = req.body.token, courseId = req.query['course-id'];
+        var token = req.get('token'), courseId = req.query.id;
         tokenController.verify(token).then(function (userId) {
-            userController.getLoginInfo(userId).then(function (jsessionid, sid) {
-                courseController.electCourse(jsessionid, sid, courseId).then(function () {
-                    res.json(new response(0, {}));
-                }, function (errorCode) {
-                    res.json(new response(errorCode, {}));
-                });
+            return userController.getLoginInfo(userId).then(function (jsessionid, sid) {
+                return courseController.electCourse(jsessionid, sid, courseId, true);
             });
-        }, function () {
-            res.json(new response(26, {}));
+        }).then(function () {
+            res.json(new Response(statusCode.success, {}));
         }).catch(function (error) {
-            debug(error);
-            res.end();
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
         });
     });
 
     router.post('/unelect', function(req, res, next) {
-        debug(req.path);
-        var token = req.body.token, courseId = req.query['course-id'];
+        var token = req.get('token'), courseId = req.query.id;
         tokenController.verify(token).then(function (userId) {
-            userController.getLoginInfo(userId).then(function (jsessionid, sid) {
-                courseController.unelectCourse(jsessionid, sid, courseId).then(function () {
-                    res.json(new response(0, {}));
-                }, function (errorCode) {
-                    res.json(new response(errorCode, {}));
-                });
+            return userController.getLoginInfo(userId).then(function (jsessionid, sid) {
+                return courseController.electCourse(jsessionid, sid, courseId, false);
             });
-        }, function () {
-            res.json(new response(26, {}));
+        }).then(function () {
+            res.json(new Response(statusCode.success, {}));
         }).catch(function (error) {
-            debug(error);
-            res.end();
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
         });
     });
 
-    // router.post('/new-hunter', function(req, res, next) {
+    router.post('/new-hunter', function(req, res, next) {
+        var token = req.get('token'), courseToHunt = req.body.courseToHunt, courseToQuit = req.body.courseToQuit;
+        tokenController.verify(token).then(function (userId) {
+            return hunterController.addHunter(courseToHunt, courseToQuit, userId);
+        }).then(function (hunterId) {
+            hunterProcess.send({create: hunterId});
+            res.json(new Response(statusCode.success, {}));
+        }).catch(function (error) {
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
+        });
+    });
 
-    // });
+    router.get('/hunters', function(req, res, next) {
+        var token = req.get('token');
+        tokenController.verify(token).then(function (userId) {
+            return hunterController.getHunterByOwner(userId);
+        }).then(function (hunters) {
+            res.json(new Response(statusCode.success, {hunters: hunters}));
+        }).catch(function (error) {
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
+        });
+    });
 
-    // router.post('/hunters', function(req, res, next) {
+    router.post('/kill-hunter', function(req, res, next) {
+        var token = req.get('token'), hunterId = req.body.id;
+        tokenController.verify(token).then(function (userId) {
+            return hunterController.isOwnedBy(hunterId, userId);
+        }).then(function () {
+            hunterProcess.send({kill: hunterId});
+            res.json(new Response(statusCode.success, {}));
+        }).catch(function (error) {
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
+        });
+    });
 
-    // });
-
-    // router.post('/kill-hunter', function(req, res, next) {
-
-    // });
-
-    // router.delete('/remove-hunter', function(req, res, next) {
-
-    // });
+    router.delete('/remove-hunter', function(req, res, next) {
+        var token = req.get('token'), hunterId = req.body.id;
+        tokenController.verify(token).then(function (userId) {
+            return hunterController.isOwnedBy(hunterId, userId).then(function (hunter) {
+                return hunter.hunterStatus == hunterStatus.dead ? hunterController.deleteHunter(hunterId) : Promise.reject(statusCode.hunter_is_alive);
+            });
+        }).then(function () {
+            res.json(new Response(statusCode.success, {}));
+        }).catch(function (error) {
+            if (Number.isInteger(error)) {
+                res.json(new Response(error, {}));
+            } else {
+                debug(error);
+                res.end();
+            }
+        });
+    });
     return router;
 }

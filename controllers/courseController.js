@@ -18,26 +18,27 @@ function getCourseGroupsWithUrl(jsessionid, sid) {
 	var options = {
 	    host: 'uems.sysu.edu.cn',
 	    path: '/elect/s/types?' + query,
-	    method: 'GET',
 	    headers: {
 	      	Cookie: 'JSESSIONID=' + jsessionid,
 	      	Connection: 'keep-alive'
 	    }
   	};
 	return new Promise(function (resolve, reject) {
-		var req = http.request(options, function (res) {
+		http.get(options, function (res) {
 			res.setEncoding('utf8');
-			if (res.statusCode == 500) {
-				reject(statusCode['sid fails']);
-			} else {
-				var body = [];
-				res.on('data', function (chunk) {
-					body.push(chunk);
-				}).on('end', function () {
+			var body = [];
+			res.on('data', function (chunk) {
+				body.push(chunk);
+			}).on('end', function () {
+				if (res.statusCode == 500) {
+					reject(statusCode.sid_fails);
+				} else {
 					var html = body.join();
 					var courseGroup = [];
 					var regex = /<td class='c'><a href="([^"]+)">([^<]+)<\/a><\/td>/g;
+					var counter = 0;
 					for (var match = regex.exec(html); match; match = regex.exec(html)) {
+						debug(counter++);
 						var group = {
 							name: match[2],
 							url: match[1]
@@ -45,14 +46,12 @@ function getCourseGroupsWithUrl(jsessionid, sid) {
 						courseGroup.push(group);
 					}
 					resolve(courseGroup);
-				});
-			}
-		});
-		req.on('error', function (err) {
+				}
+			});
+		}).on('error', function (err) {
 			debug(err);
-			reject(statusCode['http error']);
+			reject(statusCode.http_error);
 		});
-		req.end();
 	});
 }
 
@@ -80,7 +79,7 @@ function getCoursesByUrl(jsessionid, url) {
 		var req = http.request(options, function (res) {
 			res.setEncoding('utf8');
 			if (res.statusCode == 500) {
-				reject(statusCode['sid fails']);
+				reject(statusCode.sid_fails);
 			} else {
 				var body = [];
 				res.on('data', function (chunk) {
@@ -125,7 +124,7 @@ function getCoursesByUrl(jsessionid, url) {
 		});
 		req.on('error', function (err) {
 			debug(err);
-			reject(statusCode['http error']);
+			reject(statusCode.http_error);
 		});
 		req.end();
 	});
@@ -145,20 +144,24 @@ var courseController = {
         debug(/function (\w*)/.exec(arguments.callee.toString())[1]);
 		return new Promise(function (resolve, reject) {
 			getCourseGroupsWithUrl(jsessionid, sid).then(function (courseGroup) {
-				var counter = 0;
-				for (var index = 0; index < courseGroup.length; ++index) {
-					(function (index) {
-						getCoursesByUrl(jsessionid, courseGroup[index].url).then(function (data) {
-							courseGroup[index].elected = data.elected;
-							courseGroup[index].courses = data.courses;
-							delete courseGroup[index].url;
-							if (++counter == courseGroup.length) {
-								resolve(courseGroup);
-							}
-						}, function (errCode) {
-							reject(errCode);
-						});
-					})(index);
+				if (courseGroup.length) {
+					var counter = 0;
+					for (var index = 0; index < courseGroup.length; ++index) {
+						(function (index) {
+							getCoursesByUrl(jsessionid, courseGroup[index].url).then(function (data) {
+								courseGroup[index].elected = data.elected;
+								courseGroup[index].courses = data.courses;
+								delete courseGroup[index].url;
+								if (++counter == courseGroup.length) {
+									resolve(courseGroup);
+								}
+							}, function (errCode) {
+								reject(errCode);
+							});
+						})(index);
+					}
+				} else {
+					resolve(courseGroup);
 				}
 			});
 		});
@@ -192,7 +195,7 @@ var courseController = {
 			var req = http.request(options, function (res) {
 				res.setEncoding('utf8');
 				if (res.statusCode == 500) {
-					reject(statusCode['sid fails']);
+					reject(statusCode.sid_fails);
 				} else {
 					var body = [];
 					res.on('data', function (chunk) {
@@ -210,7 +213,7 @@ var courseController = {
 			});
 			req.on('error', function (err) {
 				debug(err);
-				reject(statusCode['http error']);
+				reject(statusCode.http_error);
 			});
 			req.end();
 		});
@@ -245,7 +248,7 @@ var courseController = {
 			var req = http.request(options, function (res) {
 				res.setEncoding('utf8');
 				if (res.statusCode == 500) {
-					reject(statusCode['sid fails']);
+					reject(statusCode.sid_fails);
 				} else {
 					var body = [];
 					res.on('data', function (chunk) {
@@ -264,7 +267,7 @@ var courseController = {
 			});
 			req.on('error', function (err) {
 				debug(err);
-				reject(statusCode['http error']);
+				reject(statusCode.http_error);
 			});
 			req.write(postData);
 			req.end();

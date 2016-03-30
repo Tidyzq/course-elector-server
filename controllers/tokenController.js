@@ -18,7 +18,7 @@ var tokenController = {
 			jwt.sign({ userId: userId }, signature, {expiresIn: '7 days'}, function (token) {
 				resolve(token);
 			});
-		})
+		});
 	},
 	// 参数：
 	// 		token 用户令牌
@@ -34,9 +34,9 @@ var tokenController = {
 			jwt.verify(token, signature, function (err, decoded) {
 				if (err) {
 					if (err.name == 'TokenExpiredError') {
-                        reject(statusCode['token expired']);
+                        reject(statusCode.token_expired);
                     } else {
-                        reject(statusCode['invalid token']);
+                        reject(statusCode.invalid_token);
                     }
 				} else {
 					resolve(decoded.userId);

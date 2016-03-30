@@ -91,6 +91,11 @@ mongoClient.connect(db_path).then(function (db) {
         debug('Listening on ' + bind);
     }
 
+    process.on('SIGINT', function () {
+        debug("Caught interrupt signal");
+        process.exit();
+    });
+
     process.on('exit', function (code) {
         db.close();
         debug("Connection closed");
